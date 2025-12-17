@@ -1,4 +1,3 @@
-import os
 import asyncio
 import random
 import requests
@@ -13,7 +12,8 @@ from telegram.ext import (
 
 from config import BOT_TOKEN, OWNER_ID, API_URL, API_KEY, WEBHOOK_PATH
 
-# ---------- ALL STATES + UT ----------
+# ================== STATES (ALL INDIA) ==================
+
 STATES = {
     "AN": "Andaman & Nicobar Islands",
     "AP": "Andhra Pradesh",
@@ -56,18 +56,20 @@ STATES = {
 
 STATES_PER_PAGE = 10
 
-# ---------- RUNTIME DATA ----------
+# ================== RUNTIME DATA ==================
+
 session = {}
 stats = {
-    "total_requests": 0,
-    "total_hits": 0,
-    "last_state": None
+    "requests": 0,
+    "hits": 0,
+    "last_state": "-"
 }
 
 def owner_only(uid: int) -> bool:
     return uid == OWNER_ID
 
-# ---------- UI ----------
+# ================== UI ==================
+
 def main_menu():
     return InlineKeyboardMarkup([
         [
@@ -76,20 +78,22 @@ def main_menu():
         ]
     ])
 
-def states_menu(page: int = 0):
+def states_menu(page=0):
     items = list(STATES.items())
     start = page * STATES_PER_PAGE
     end = start + STATES_PER_PAGE
 
-    buttons = []
-    for code, name in items[start:end]:
-        buttons.append([InlineKeyboardButton(name, callback_data=f"state_{code}")])
+    buttons = [
+        [InlineKeyboardButton(name, callback_data=f"state_{code}")]
+        for code, name in items[start:end]
+    ]
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅ Prev", callback_data=f"states_page_{page-1}"))
+        nav.append(InlineKeyboardButton("⬅ Prev", callback_data=f"states_{page-1}"))
     if end < len(items):
-        nav.append(InlineKeyboardButton("Next ➡", callback_data=f"states_page_{page+1}"))
+        nav.append(InlineKeyboardButton("Next ➡", callback_data=f"states_{page+1}"))
+
     if nav:
         buttons.append(nav)
 
@@ -105,12 +109,13 @@ def batch_menu():
         [InlineKeyboardButton("🔙 Back", callback_data="menu_states")]
     ])
 
-# ---------- HANDLERS ----------
+# ================== HANDLERS ==================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not owner_only(update.effective_user.id):
         await update.message.reply_text("⛔ Access Denied")
         return
-    await update.message.reply_text("Choose an option:", reply_markup=main_menu())
+    await update.message.reply_text("Select option:", reply_markup=main_menu())
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -123,8 +128,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if q.data == "menu_states":
         await q.edit_message_text("Select State (Page 1):", reply_markup=states_menu(0))
 
-    elif q.data.startswith("states_page_"):
-        page = int(q.data.split("_")[-1])
+    elif q.data.startswith("states_"):
+        page = int(q.data.split("_")[1])
         await q.edit_message_text(
             f"Select State (Page {page+1}):",
             reply_markup=states_menu(page)
@@ -132,15 +137,15 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif q.data == "menu_stats":
         await q.edit_message_text(
-            "📊 Stats\n\n"
-            f"Total Requests: {stats['total_requests']}\n"
-            f"Total Hits Sent: {stats['total_hits']}\n"
+            f"📊 Stats\n\n"
+            f"Requests: {stats['requests']}\n"
+            f"Hits: {stats['hits']}\n"
             f"Last State: {stats['last_state']}",
             reply_markup=main_menu()
         )
 
     elif q.data == "menu_back":
-        await q.edit_message_text("Choose an option:", reply_markup=main_menu())
+        await q.edit_message_text("Select option:", reply_markup=main_menu())
 
 async def state_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -151,7 +156,7 @@ async def state_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     state = q.data.split("_")[1]
-    session[q.from_user.id] = {"state": state}
+    session[q.from_user.id] = state
     stats["last_state"] = state
 
     await q.edit_message_text(
@@ -159,22 +164,19 @@ async def state_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=batch_menu()
     )
 
-# ---------- CORE ----------
-def gen_vehicle(state: str) -> str:
-    return (
-        f"{state}{random.randint(1,99):02d}"
-        f"{chr(random.randint(65,90))}{chr(random.randint(65,90))}"
-        f"{random.randint(1000,9999)}"
-    )
+# ================== CORE ==================
 
-def fetch_data(reg: str):
+def gen_vehicle(state):
+    return f"{state}{random.randint(1,99):02d}{chr(random.randint(65,90))}{chr(random.randint(65,90))}{random.randint(1000,9999)}"
+
+def fetch_vehicle(reg):
     try:
         r = requests.get(API_URL, params={"reg": reg, "key": API_KEY}, timeout=8)
-        stats["total_requests"] += 1
+        stats["requests"] += 1
         if r.status_code == 200:
             j = r.json()
             if j.get("mobile_no"):
-                stats["total_hits"] += 1
+                stats["hits"] += 1
                 return f"{j['reg_no']} | {j['mobile_no']}"
     except:
         pass
@@ -185,10 +187,9 @@ async def batch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
 
     if not owner_only(q.from_user.id):
-        await q.edit_message_text("⛔ Access Denied")
         return
 
-    state = session.get(q.from_user.id, {}).get("state")
+    state = session.get(q.from_user.id)
     if not state:
         await q.edit_message_text("Restart with /start")
         return
@@ -196,36 +197,37 @@ async def batch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     unlimited = q.data == "batch_unlimited"
     batches = 999999 if unlimited else int(q.data.split("_")[1])
 
-    await q.edit_message_text("⏳ Fetching...")
+    await q.edit_message_text("⏳ Working...")
 
-    sent = 0
+    count = 0
     for _ in range(batches):
-        out = []
+        result = []
         for _ in range(50):
-            d = fetch_data(gen_vehicle(state))
+            d = fetch_vehicle(gen_vehicle(state))
             if d:
-                out.append(d)
+                result.append(d)
 
-        if out:
-            await context.bot.send_message(q.message.chat_id, "\n".join(out))
+        if result:
+            await context.bot.send_message(q.message.chat_id, "\n".join(result))
             await asyncio.sleep(1)
 
-        sent += 1
-        if unlimited and sent >= 20:  # safety cap
+        count += 1
+        if unlimited and count >= 20:
             break
 
     await context.bot.send_message(q.message.chat_id, "✅ Done")
 
-# ---------- APP & WEBHOOK ----------
+# ================== APP + WEBHOOK ==================
+
 def build_app():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu_handler, pattern="^(menu_|states_page_)"))
+    app.add_handler(CallbackQueryHandler(menu_handler, pattern="^(menu_|states_)"))
     app.add_handler(CallbackQueryHandler(state_select, pattern="^state_"))
     app.add_handler(CallbackQueryHandler(batch_handler, pattern="^batch_"))
     return app
 
-async def handle(request):
+async def webhook_handler(request):
     data = await request.json()
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
@@ -236,17 +238,20 @@ async def main():
     telegram_app = build_app()
 
     await telegram_app.initialize()
-    external_url = os.getenv("RENDER_EXTERNAL_URL")
-    await telegram_app.bot.set_webhook(url=f"{external_url}{WEBHOOK_PATH}")
+
+    # Render provides this automatically
+    import os
+    base_url = os.getenv("RENDER_EXTERNAL_URL")
+    await telegram_app.bot.set_webhook(f"{base_url}{WEBHOOK_PATH}")
+
     await telegram_app.start()
 
     app = web.Application()
-    app.router.add_post(WEBHOOK_PATH, handle)
+    app.router.add_post(WEBHOOK_PATH, webhook_handler)
 
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.getenv("PORT", "10000"))
-    site = web.TCPSite(runner, "0.0.0.0", port)
+    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", "10000")))
     await site.start()
 
     await asyncio.Event().wait()
