@@ -1,7 +1,4 @@
-import os
-
-# Use Render Environment Variable for safety
-BOT_TOKEN = os.getenv("8180884331:AAHHNk_tzoouG4iKxOb5HQWivrbkJZOelBE")
+BOT_TOKEN = "8180884331:AAHHNk_tzoouG4iKxOb5HQWivrbkJZOelBE"
 
 OWNER_ID = 8120431402
 
